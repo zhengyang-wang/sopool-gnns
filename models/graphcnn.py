@@ -6,11 +6,8 @@ import sys
 sys.path.append("models/")
 from mlp import MLP
 
-from torch.autograd import Variable
-import pdb
-
 class GraphCNN(nn.Module):
-    def __init__(self, sortpooling_k, num_layers, num_mlp_layers, input_dim, hidden_dim, output_dim, final_dropout, learn_eps, graph_pooling_type, neighbor_pooling_type, device):
+    def __init__(self, num_layers, num_mlp_layers, input_dim, hidden_dim, output_dim, final_dropout, learn_eps, graph_pooling_type, neighbor_pooling_type, device):
         '''
             num_layers: number of layers in the neural networks (INCLUDING the input layer)
             num_mlp_layers: number of layers in mlps (EXCLUDING the input layer)
@@ -48,25 +45,14 @@ class GraphCNN(nn.Module):
 
             self.batch_norms.append(nn.BatchNorm1d(hidden_dim))
 
-        # for bilinear mapping second-order pooling
-        self.total_latent_dim = input_dim + hidden_dim * (num_layers - 1)
-        # self.inter_dim = 32
-        # self.BiMap = nn.Linear(self.total_latent_dim, self.inter_dim, bias=False)
+        #Linear function that maps the hidden representation at dofferemt layers into a prediction score
+        self.linears_prediction = torch.nn.ModuleList()
+        for layer in range(num_layers):
+            if layer == 0:
+                self.linears_prediction.append(nn.Linear(input_dim, output_dim))
+            else:
+                self.linears_prediction.append(nn.Linear(hidden_dim, output_dim))
 
-        # for attentional second-order pooling
-        self.k = sortpooling_k
-        self.attend = nn.Linear(self.total_latent_dim, self.k)
-
-        self.linear1 = nn.Linear(self.k * self.total_latent_dim, output_dim)
-
-        # for 1d convlution and dense layers
-        # self.conv1d_params1 = nn.Conv1d(1, 16, self.total_latent_dim, self.total_latent_dim)
-        # self.maxpool1d = nn.MaxPool1d(2, 2)
-        # self.conv1d_params2 = nn.Conv1d(16, 32, 5, 1)
-        # dense_dim = int((self.k - 2) / 2 + 1)
-        # self.dense_dim = (dense_dim - 5 + 1) * 32
-        # self.h1_weights = nn.Linear(self.dense_dim, 128)
-        # self.h2_weights = nn.Linear(128, output_dim)
 
     def __preprocess_neighbors_maxpool(self, batch_graph):
         ###create padded_neighbor_list in concatenated graph
@@ -208,8 +194,7 @@ class GraphCNN(nn.Module):
 
     def forward(self, batch_graph):
         X_concat = torch.cat([graph.node_features for graph in batch_graph], 0).to(self.device)
-
-        # graph_pool = self.__preprocess_graphpool(batch_graph)
+        graph_pool = self.__preprocess_graphpool(batch_graph)
 
         if self.neighbor_pooling_type == "max":
             padded_neighbor_list = self.__preprocess_neighbors_maxpool(batch_graph)
@@ -232,23 +217,11 @@ class GraphCNN(nn.Module):
 
             hidden_rep.append(h)
 
-        hidden_rep = torch.cat(hidden_rep, 1)
+        score_over_layer = 0
+    
+        #perform pooling over all nodes in each graph in every layer
+        for layer, h in enumerate(hidden_rep):
+            pooled_h = torch.spmm(graph_pool, h)
+            score_over_layer += F.dropout(self.linears_prediction[layer](pooled_h), self.final_dropout, training = self.training)
 
-        graph_sizes = [graph.node_features.size()[0] for graph in batch_graph]
-
-        batch_graphs = torch.zeros(len(graph_sizes), self.k * self.total_latent_dim).to(self.device)
-        batch_graphs = Variable(batch_graphs)
-
-        node_embeddings = torch.split(hidden_rep, graph_sizes, dim=0)
-
-        for g_i in range(len(graph_sizes)):
-            cur_node_embeddings = node_embeddings[g_i]
-            # b_cur_node_embeddings = self.BiMap(cur_node_embeddings)
-            attn_coef = self.attend(cur_node_embeddings)
-            attn_weights = torch.transpose(attn_coef, 0, 1)
-            cur_graph_embeddings = torch.matmul(attn_weights, cur_node_embeddings)
-            batch_graphs[g_i] = cur_graph_embeddings.view(self.k * self.total_latent_dim)
-
-        score = F.dropout(self.linear1(batch_graphs), self.final_dropout, training=self.training)
-
-        return score
+        return score_over_layer

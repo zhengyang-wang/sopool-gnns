@@ -4,7 +4,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
-import math
 
 from tqdm import tqdm
 
@@ -118,9 +117,6 @@ def main():
     					help='let the input node features be the degree of nodes (heuristics for unlabeled graph)')
     parser.add_argument('--filename', type = str, default = "",
                                         help='output file')
-
-    parser.add_argument('-sortpooling_k', type=float, default=30, help='number of nodes kept after SortPooling')
-
     args = parser.parse_args()
 
     #set up seeds and gpu device
@@ -135,21 +131,16 @@ def main():
     ##10-fold cross validation. Conduct an experiment on the fold specified by args.fold_idx.
     train_graphs, test_graphs = separate_data(graphs, args.seed, args.fold_idx)
 
-    if args.sortpooling_k <= 1:
-        num_nodes_list = sorted([g.node_features.size()[0] for g in train_graphs + test_graphs])
-        args.sortpooling_k = num_nodes_list[int(math.ceil(args.sortpooling_k * len(num_nodes_list))) - 1]
-        args.sortpooling_k = max(10, args.sortpooling_k)
-        print('k used in SortPooling is: ' + str(args.sortpooling_k))
-
-    model = GraphCNN(args.sortpooling_k, args.num_layers, args.num_mlp_layers, train_graphs[0].node_features.shape[1], args.hidden_dim, num_classes, args.final_dropout, args.learn_eps, args.graph_pooling_type, args.neighbor_pooling_type, device).to(device)
+    model = GraphCNN(args.num_layers, args.num_mlp_layers, train_graphs[0].node_features.shape[1], args.hidden_dim, num_classes, args.final_dropout, args.learn_eps, args.graph_pooling_type, args.neighbor_pooling_type, device).to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.5)
 
     max_acc = 0.0
     for epoch in range(1, args.epochs + 1):
-        avg_loss = train(args, model, device, train_graphs, optimizer, epoch)
         scheduler.step()
+
+        avg_loss = train(args, model, device, train_graphs, optimizer, epoch)
         acc_train, acc_test = test(args, model, device, train_graphs, test_graphs, epoch)
 
         max_acc = max(max_acc, acc_test)
