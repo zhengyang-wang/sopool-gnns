@@ -17,7 +17,7 @@ PyTorch > 1.0.0, tqdm, networkx, numpy
 
 ## Setup
 
-If you want to try our proposed second-order pooling methods, copy the *graphcnn.py* file into the *models* folder from either *sopool_bilinear*((bilinear second-order pooling) or *sopool_attn* (attentional second-order pooling).
+If you want to try our proposed second-order pooling methods, copy the **graphcnn.py** file into the **models** folder from either the **sopool_bilinear** folder (bilinear second-order pooling) or the **sopool_attn** folder (attentional second-order pooling).
 
 ## Run the code
 
